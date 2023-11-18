@@ -7,6 +7,7 @@ Allows to write and send lines from a simple file using tail-like mechanism
 * no dependencies
 * small footprint
 * simplest implementation which work without any side effects
+* use sequential writes
 
 ## How to add it into your app
 
