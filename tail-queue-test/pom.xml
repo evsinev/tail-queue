@@ -12,6 +12,19 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
 
+    <properties>
+        <skipTests>true</skipTests>
+    </properties>
+
+    <profiles>
+        <profile>
+            <id>integration-test</id>
+            <properties>
+                <skipTests>false</skipTests>
+            </properties>
+        </profile>
+    </profiles>
+
     <dependencies>
 
         <dependency>
@@ -60,6 +73,5 @@
         </dependency>
 
     </dependencies>
-
 
 </project>
