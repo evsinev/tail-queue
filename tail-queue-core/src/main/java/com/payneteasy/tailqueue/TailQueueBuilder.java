@@ -5,6 +5,7 @@ import com.payneteasy.tailqueue.impl.*;
 import java.io.File;
 import java.time.Duration;
 
+import static com.payneteasy.tailqueue.impl.util.SafeFiles.mkDirs;
 import static java.util.Objects.requireNonNull;
 
 public class TailQueueBuilder {
@@ -69,11 +70,7 @@ public class TailQueueBuilder {
         requireNonNull(sender, "Sender is null");
         requireNonNull(dir, "Dir is null");
 
-        if(!dir.exists()) {
-            if(!dir.mkdirs()) {
-                throw new IllegalStateException("Cannot create dir " + dir.getAbsolutePath());
-            }
-        }
+        mkDirs(dir);
 
         ITailQueueWriter writer = new TailQueueWriterImpl(
                 dir

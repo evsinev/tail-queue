@@ -21,9 +21,9 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
 
     private static final String LINE_SEPARATOR = System.lineSeparator();
 
-    private final File              dir;
-    private final DateTimeFormatter dateFormatter;
-    private final String            filePrefix;
+    private final File                      dir;
+    private final DateTimeFormatter         dateFormatter;
+    private final String                    filePrefix;
     private final String                    fileSuffix;
     private final ITailQueueMetricsListener tailQueueStat;
 

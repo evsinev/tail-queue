@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.zip.GZIPOutputStream;
 
+import static com.payneteasy.tailqueue.impl.util.SafeFiles.mkDirs;
+
 public class TailQueueRetentionArchiver implements ITailQueueRetention {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailQueueRetentionArchiver.class);
@@ -16,7 +18,7 @@ public class TailQueueRetentionArchiver implements ITailQueueRetention {
     private final File processedDir;
 
     public TailQueueRetentionArchiver(File processedDir) {
-        this.processedDir = processedDir;
+        this.processedDir = mkDirs(processedDir);
     }
 
     @Override
