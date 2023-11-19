@@ -1,5 +1,6 @@
 package com.payneteasy.tailqueue.impl;
 
+import com.payneteasy.tailqueue.ITailQueueMetricsListener;
 import com.payneteasy.tailqueue.ITailQueueRetention;
 import com.payneteasy.tailqueue.ITailQueueSender;
 import org.slf4j.Logger;
@@ -18,16 +19,18 @@ public class TailQueueDirSender {
 
     private static final Logger LOG = LoggerFactory.getLogger( TailQueueDirSender.class );
 
-    private final File                dir;
-    private final TailQueueFileFilter fileFilter;
-    private final ITailQueueSender    sender;
-    private final ITailQueueRetention retention;
+    private final File                      dir;
+    private final TailQueueFileFilter       fileFilter;
+    private final ITailQueueSender          sender;
+    private final ITailQueueRetention       retention;
+    private final ITailQueueMetricsListener metricsListener;
 
-    public TailQueueDirSender(File dir, TailQueueFileFilter fileFilter, ITailQueueSender sender, ITailQueueRetention retention) {
-        this.dir        = dir;
-        this.fileFilter = fileFilter;
-        this.sender     = sender;
-        this.retention  = retention;
+    public TailQueueDirSender(File dir, TailQueueFileFilter fileFilter, ITailQueueSender sender, ITailQueueRetention retention, ITailQueueMetricsListener metricsListener) {
+        this.dir             = dir;
+        this.fileFilter      = fileFilter;
+        this.sender          = sender;
+        this.retention       = retention;
+        this.metricsListener = metricsListener;
     }
 
     void processDir() {
@@ -60,6 +63,7 @@ public class TailQueueDirSender {
     private void archiveFile(File aFile, int current, int count) {
         LOG.debug("Archiving file ({}/{}) {}...", aFile, current, count);
         retention.archiveFile(aFile);
+        metricsListener.didSenderDirArchiveFile();
     }
 
     private void sendFile(File aFile, int current, int count) throws IOException {
@@ -71,13 +75,17 @@ public class TailQueueDirSender {
                 sender.sendMessage(line);
             }
         }
+        metricsListener.didSenderDirSendFile(current, count);
     }
 
     private List<File> createFileListForDirProcess() {
         File[] files = dir.listFiles(fileFilter);
         if(files == null || files.length == 0) {
+            metricsListener.didSenderDirFilesCount(0);
             return Collections.emptyList();
         }
+
+        metricsListener.didSenderDirFilesCount(files.length - 1);
 
         Arrays.sort(files, Comparator.comparing(File::getName));
         // do not send last file

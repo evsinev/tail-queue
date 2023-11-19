@@ -12,13 +12,13 @@ public class TailQueueBuilder {
     private ITailQueueSender    sender;
     private File                dir;
 
-    private TailQueueRollCycle  rollCycle           = TailQueueRollCycle.MINUTELY;
-    private String              filePrefix          = "";
-    private String              fileSuffix          = ".json";
-    private ITailQueueStat      statListener        = new TailQueueStatListenerNoOp();
-    private ITailQueueRetention retention           = new TailQueueRetentionDeleteFile();
-    private Duration            liveWaitDuration    = Duration.ofMillis(500);
-    private Duration            dirListWaitDuration = Duration.ofMillis(500);
+    private TailQueueRollCycle        rollCycle           = TailQueueRollCycle.MINUTELY;
+    private String                    filePrefix          = "";
+    private String                    fileSuffix          = ".json";
+    private ITailQueueMetricsListener metricsListener     = new TailQueueMetricsListenerListenerNoOp();
+    private ITailQueueRetention       retention           = new TailQueueRetentionDeleteFile();
+    private Duration                  liveWaitDuration    = Duration.ofMillis(500);
+    private Duration                  dirListWaitDuration = Duration.ofMillis(500);
 
     public TailQueueBuilder sender(ITailQueueSender sender) {
         this.sender = sender;
@@ -45,8 +45,8 @@ public class TailQueueBuilder {
         return this;
     }
 
-    public TailQueueBuilder statListener(ITailQueueStat statListener) {
-        this.statListener = statListener;
+    public TailQueueBuilder metricsListener(ITailQueueMetricsListener statListener) {
+        this.metricsListener = statListener;
         return this;
     }
 
@@ -80,7 +80,7 @@ public class TailQueueBuilder {
                 , rollCycle.getDateFormatter()
                 , filePrefix
                 , fileSuffix
-                , statListener
+                , metricsListener
         );
 
         TailQueueSenderTask senderTask = createSenderTask();
@@ -100,6 +100,7 @@ public class TailQueueBuilder {
                 , fileFilter
                 , sender
                 , retention
+                , metricsListener
         );
 
         TailQueueFileTailer fileTailer = new TailQueueFileTailer(
@@ -107,6 +108,7 @@ public class TailQueueBuilder {
                 , sender
                 , fileFilter
                 , liveWaitDuration
+                , metricsListener
         );
 
         return new TailQueueSenderTask(
@@ -114,6 +116,7 @@ public class TailQueueBuilder {
                 , dirSender
                 , fileTailer
                 , dirListWaitDuration
+                , metricsListener
         );
     }
 }

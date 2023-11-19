@@ -1,5 +1,6 @@
 package com.payneteasy.tailqueue.impl;
 
+import com.payneteasy.tailqueue.ITailQueueMetricsListener;
 import com.payneteasy.tailqueue.ITailQueueSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,16 +18,18 @@ public class TailQueueFileTailer {
 
     private static final Logger LOG = LoggerFactory.getLogger( TailQueueFileTailer.class );
 
-    private final File                dir;
-    private final ITailQueueSender    sender;
-    private final TailQueueFileFilter fileFilter;
-    private final Duration            lineDuration;
+    private final File                      dir;
+    private final ITailQueueSender          sender;
+    private final TailQueueFileFilter       fileFilter;
+    private final Duration                  lineDuration;
+    private final ITailQueueMetricsListener metricsListener;
 
-    public TailQueueFileTailer(File dir, ITailQueueSender sender, TailQueueFileFilter fileFilter, Duration lineDuration) {
-        this.dir          = dir;
-        this.sender       = sender;
-        this.fileFilter   = fileFilter;
-        this.lineDuration = lineDuration;
+    public TailQueueFileTailer(File dir, ITailQueueSender sender, TailQueueFileFilter fileFilter, Duration lineDuration, ITailQueueMetricsListener metricsListener) {
+        this.dir             = dir;
+        this.sender          = sender;
+        this.fileFilter      = fileFilter;
+        this.lineDuration    = lineDuration;
+        this.metricsListener = metricsListener;
     }
 
     public void tailOneFile() throws InterruptedException {
@@ -49,6 +52,7 @@ public class TailQueueFileTailer {
                 if (line != null) {
                     LOG.debug("Send line {}:{} ...", aFile.getName(), in.getLineNumber());
                     sender.sendMessage(line);
+                    metricsListener.didSenderFileSendLine(in.getLineNumber());
                     continue;
                 }
 
@@ -59,11 +63,12 @@ public class TailQueueFileTailer {
 
                 sleepForNewLine();
             }
-        } catch (IOException e) {
-            LOG.error("Cannot process file {}", aFile.getAbsolutePath(), e);
         } catch (InterruptedException e) {
             LOG.warn("Tailing file interrupted {}", aFile.getAbsolutePath());
             throw e;
+        } catch (Exception e) {
+            LOG.error("Cannot process file {}", aFile.getAbsolutePath(), e);
+            metricsListener.didSenderFileError();
         }
     }
 

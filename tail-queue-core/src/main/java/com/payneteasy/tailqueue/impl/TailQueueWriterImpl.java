@@ -1,6 +1,6 @@
 package com.payneteasy.tailqueue.impl;
 
-import com.payneteasy.tailqueue.ITailQueueStat;
+import com.payneteasy.tailqueue.ITailQueueMetricsListener;
 import com.payneteasy.tailqueue.ITailQueueWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +24,10 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
     private final File              dir;
     private final DateTimeFormatter dateFormatter;
     private final String            filePrefix;
-    private final String            fileSuffix;
-    private final ITailQueueStat    tailQueueStat;
+    private final String                    fileSuffix;
+    private final ITailQueueMetricsListener tailQueueStat;
 
-    public TailQueueWriterImpl(File dir, DateTimeFormatter dateFormatter, String filePrefix, String fileSuffix, ITailQueueStat tailQueueStat) {
+    public TailQueueWriterImpl(File dir, DateTimeFormatter dateFormatter, String filePrefix, String fileSuffix, ITailQueueMetricsListener tailQueueStat) {
         this.dir           = dir;
         this.dateFormatter = dateFormatter;
         this.filePrefix    = filePrefix;
@@ -47,9 +47,9 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
             out.write(aMessage);
             out.write(LINE_SEPARATOR);
             out.flush();
-            tailQueueStat.onMessageWritten();
+            tailQueueStat.didWriteMessageSuccess();
         } catch (Exception e) {
-            tailQueueStat.onMessageWriteError();
+            tailQueueStat.didWriteMessageError();
             LOG.error("Cannot write to file {} : {}", file.getAbsolutePath(), aMessage, e);
         }
     }
