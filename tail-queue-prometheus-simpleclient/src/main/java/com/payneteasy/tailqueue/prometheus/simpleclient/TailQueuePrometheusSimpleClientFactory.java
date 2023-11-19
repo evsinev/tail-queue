@@ -15,6 +15,8 @@ public class TailQueuePrometheusSimpleClientFactory {
     private final Gauge   senderDirFilesCount          = gauge   ("sender_dir_files_count");
     private final Counter senderFileError              = counter ("sender_file_error");
     private final Gauge   senderFileSendLine           = gauge   ("sender_file_line");
+    private final Counter senderDirSendLineSuccess     = counter ("sender_dir_send_line_success");
+    private final Counter senderFileSendLineSuccess    = counter ("sender_file_send_line_success");
 
     private static Counter counter(String aSuffix) {
         String name = "tail_queue_" + aSuffix;
@@ -49,6 +51,8 @@ public class TailQueuePrometheusSimpleClientFactory {
                 , senderDirFilesCount.labels(aName)
                 , senderFileError.labels(aName)
                 , senderFileSendLine.labels(aName)
+                , senderDirSendLineSuccess.labels(aName)
+                , senderFileSendLineSuccess.labels(aName)
         );
     }
 }

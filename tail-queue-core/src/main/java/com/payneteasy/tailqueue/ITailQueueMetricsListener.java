@@ -17,4 +17,8 @@ public interface ITailQueueMetricsListener {
     void didSenderFileError();
 
     void didSenderFileSendLine(int aLineNumber);
+
+    void didSenderDirSendLineSuccess();
+
+    void didSenderFileSendLineSuccess();
 }

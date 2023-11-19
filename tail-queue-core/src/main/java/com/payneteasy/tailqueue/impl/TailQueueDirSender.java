@@ -73,6 +73,7 @@ public class TailQueueDirSender {
             while( (line = in.readLine()) != null) {
                 LOG.debug("Sending line {}:{} ({}/{})...", aFile.getName(), in.getLineNumber(), current, count);
                 sender.sendMessage(line);
+                metricsListener.didSenderDirSendLineSuccess();
             }
         }
         metricsListener.didSenderDirSendFile(current, count);

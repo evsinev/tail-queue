@@ -53,6 +53,7 @@ public class TailQueueFileTailer {
                     LOG.debug("Send line {}:{} ...", aFile.getName(), in.getLineNumber());
                     sender.sendMessage(line);
                     metricsListener.didSenderFileSendLine(in.getLineNumber());
+                    metricsListener.didSenderFileSendLineSuccess();
                     continue;
                 }
 

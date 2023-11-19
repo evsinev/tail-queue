@@ -43,4 +43,14 @@ public class TailQueueMetricsListenerListenerNoOp implements ITailQueueMetricsLi
     public void didSenderFileSendLine(int aLineNumber) {
 
     }
+
+    @Override
+    public void didSenderDirSendLineSuccess() {
+
+    }
+
+    @Override
+    public void didSenderFileSendLineSuccess() {
+
+    }
 }

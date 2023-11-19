@@ -18,6 +18,8 @@ public class TailQueueMetricsListenerPrometheusSimpleClient implements ITailQueu
     private final Gauge.Child   senderDirFilesCount;
     private final Counter.Child senderFileError;
     private final Gauge.Child   senderFileSendLine;
+    private final Counter.Child senderDirSendLineSuccess;
+    private final Counter.Child senderFileSendLineSuccess;
 
     @Override
     public void didWriteMessageSuccess() {
@@ -58,6 +60,16 @@ public class TailQueueMetricsListenerPrometheusSimpleClient implements ITailQueu
     @Override
     public void didSenderFileSendLine(int aLineNumber) {
         senderFileSendLine.set(aLineNumber);
+    }
+
+    @Override
+    public void didSenderDirSendLineSuccess() {
+        senderDirSendLineSuccess.inc();
+    }
+
+    @Override
+    public void didSenderFileSendLineSuccess() {
+        senderFileSendLineSuccess.inc();
     }
 
     @Override
