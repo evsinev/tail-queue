@@ -6,7 +6,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -43,10 +45,13 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
             LOG.trace("Writing to {}: {}", file.getAbsolutePath(), aMessage);
         }
 
-        try (OutputStreamWriter out = new OutputStreamWriter(newOutputStream(file.toPath(), APPEND, CREATE), UTF_8)) {
-            out.write(aMessage);
-            out.write(LINE_SEPARATOR);
+        try(FileOutputStream out = new FileOutputStream(file, true)) {
+            String messageWithEndLine = aMessage + LINE_SEPARATOR;
+            byte[] bytes              = messageWithEndLine.getBytes(UTF_8);
+
+            out.write(bytes);
             out.flush();
+
             tailQueueStat.didWriteMessageSuccess();
         } catch (Exception e) {
             tailQueueStat.didWriteMessageError();
