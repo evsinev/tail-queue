@@ -39,6 +39,12 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
 
     @Override
     public synchronized void writeMessage(String aMessage) {
+        if (aMessage == null || aMessage.isEmpty()) {
+            return;
+        }
+
+        byte[] bytes = encodeToBytes(aMessage);
+
         File file = new File(dir, filePrefix + LocalDateTime.now().format(dateFormatter) + fileSuffix);
 
         if(LOG.isTraceEnabled()) {
@@ -46,8 +52,6 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
         }
 
         try(FileOutputStream out = new FileOutputStream(file, true)) {
-            String messageWithEndLine = aMessage + LINE_SEPARATOR;
-            byte[] bytes              = messageWithEndLine.getBytes(UTF_8);
 
             out.write(bytes);
             out.flush();
@@ -57,6 +61,27 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
             tailQueueStat.didWriteMessageError();
             LOG.error("Cannot write to file {} : {}", file.getAbsolutePath(), aMessage, e);
         }
+    }
+
+    private static byte[] encodeToBytes(String aMessage) {
+        String messageWithEndLine = removeNewLines(aMessage) + LINE_SEPARATOR;
+        return messageWithEndLine.getBytes(UTF_8);
+    }
+
+    private static String removeNewLines(String aMessage) {
+        return removeCharIfExists(
+                removeCharIfExists(aMessage, "\r")
+                , "\n"
+        );
+    }
+
+    private static String removeCharIfExists(String aMessage, String aSymbol) {
+
+        if(aMessage.contains(aSymbol)) {
+            return aMessage.replace(aSymbol, "");
+        }
+
+        return aMessage;
     }
 
 }

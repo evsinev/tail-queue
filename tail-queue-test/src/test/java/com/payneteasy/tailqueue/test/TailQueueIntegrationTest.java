@@ -53,6 +53,9 @@ public class TailQueueIntegrationTest {
 
         for(int i=0; i<10; i++) {
             writer.writeMessage("Hello " + i);
+            writer.writeMessage("Hello with \\n\n " + i);
+            writer.writeMessage("Hello with \\r\\n\r\n " + i);
+            writer.writeMessage("Hello with \\r\r " + i);
             Thread.sleep(200);
         }
 
