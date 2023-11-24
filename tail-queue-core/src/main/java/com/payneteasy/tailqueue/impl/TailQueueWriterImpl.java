@@ -5,23 +5,17 @@ import com.payneteasy.tailqueue.ITailQueueWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.nio.file.Files.newOutputStream;
-import static java.nio.file.StandardOpenOption.APPEND;
-import static java.nio.file.StandardOpenOption.CREATE;
 
 public class TailQueueWriterImpl implements ITailQueueWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailQueueWriterImpl.class);
-
-    private static final String LINE_SEPARATOR = System.lineSeparator();
 
     private final File                      dir;
     private final DateTimeFormatter         dateFormatter;
@@ -64,24 +58,27 @@ public class TailQueueWriterImpl implements ITailQueueWriter {
     }
 
     private static byte[] encodeToBytes(String aMessage) {
-        String messageWithEndLine = removeNewLines(aMessage) + LINE_SEPARATOR;
-        return messageWithEndLine.getBytes(UTF_8);
-    }
+        byte[] orig = aMessage.getBytes(UTF_8);
 
-    private static String removeNewLines(String aMessage) {
-        return removeCharIfExists(
-                removeCharIfExists(aMessage, "\r")
-                , "\n"
-        );
-    }
+        ByteArrayOutputStream out = new ByteArrayOutputStream(orig.length + 1);
 
-    private static String removeCharIfExists(String aMessage, String aSymbol) {
+        for (byte b : orig) {
 
-        if(aMessage.contains(aSymbol)) {
-            return aMessage.replace(aSymbol, "");
+            if (b == 0x0A) { // remove \n
+                continue;
+            }
+
+            if (b == 0x0D) { // remove \r
+                continue;
+            }
+
+            out.write(b);
         }
 
-        return aMessage;
+        // write new line \n
+        out.write(0x0A);
+
+        return out.toByteArray();
     }
 
 }
