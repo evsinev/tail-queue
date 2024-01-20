@@ -20,6 +20,7 @@ public class TailQueueBuilder {
     private ITailQueueRetention       retention           = new TailQueueRetentionDeleteFile();
     private Duration                  liveWaitDuration    = Duration.ofMillis(500);
     private Duration                  dirListWaitDuration = Duration.ofMillis(500);
+    private ITailQueueFileSender      fileSender          = new TailQueueFileSenderImpl();
 
     public TailQueueBuilder sender(ITailQueueSender sender) {
         this.sender = sender;
@@ -66,6 +67,11 @@ public class TailQueueBuilder {
         return this;
     }
 
+    public TailQueueBuilder fileSender(ITailQueueFileSender fileSender) {
+        this.fileSender = fileSender;
+        return this;
+    }
+
     public ITailQueue build() {
         requireNonNull(sender, "Sender is null");
         requireNonNull(dir, "Dir is null");
@@ -98,6 +104,7 @@ public class TailQueueBuilder {
                 , sender
                 , retention
                 , metricsListener
+                , fileSender
         );
 
         TailQueueFileTailer fileTailer = new TailQueueFileTailer(

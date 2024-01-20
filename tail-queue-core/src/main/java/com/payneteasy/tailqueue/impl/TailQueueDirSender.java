@@ -1,8 +1,6 @@
 package com.payneteasy.tailqueue.impl;
 
-import com.payneteasy.tailqueue.ITailQueueMetricsListener;
-import com.payneteasy.tailqueue.ITailQueueRetention;
-import com.payneteasy.tailqueue.ITailQueueSender;
+import com.payneteasy.tailqueue.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,59 +22,64 @@ public class TailQueueDirSender {
     private final ITailQueueSender          sender;
     private final ITailQueueRetention       retention;
     private final ITailQueueMetricsListener metricsListener;
+    private final ITailQueueFileSender      fileSender;
 
-    public TailQueueDirSender(File dir, TailQueueFileFilter fileFilter, ITailQueueSender sender, ITailQueueRetention retention, ITailQueueMetricsListener metricsListener) {
+    public TailQueueDirSender(File dir, TailQueueFileFilter fileFilter, ITailQueueSender sender, ITailQueueRetention retention, ITailQueueMetricsListener metricsListener, ITailQueueFileSender fileSender) {
         this.dir             = dir;
         this.fileFilter      = fileFilter;
         this.sender          = sender;
         this.retention       = retention;
         this.metricsListener = metricsListener;
+        this.fileSender      = fileSender;
     }
 
     void processDir() {
         List<File> filesToProcess = createFileListForDirProcess();
+        int        count          = filesToProcess.size();
 
         if(filesToProcess.isEmpty()) {
-            LOG.trace("Files to process {}", filesToProcess.size());
+            LOG.trace("Files to process {}", count);
         } else {
-            LOG.debug("Files to process {}", filesToProcess.size());
+            LOG.debug("Files to process {}", count);
         }
 
-        for (int i = 0; i < filesToProcess.size(); i++) {
+        for (int i = 0; i < count; i++) {
 
             File file = filesToProcess.get(i);
 
             try {
-                sendFile(file, i, filesToProcess.size());
+                LOG.debug("Sending file {} ...", file.getAbsolutePath());
+                sendFile(file, i, count);
             } catch (Exception e) {
                 throw new IllegalStateException("Cannot process file " + file.getAbsolutePath(), e);
             }
 
             try {
-                archiveFile(file, i, filesToProcess.size());
+                archiveFile(file, i, count);
             } catch (Exception e) {
                 throw new IllegalStateException("Cannot archive file " + file.getAbsolutePath(), e);
             }
         }
     }
 
+    private void sendFile(File file, int aCurrent, int aCount) throws IOException {
+        TailQueueFileSenderContext context = TailQueueFileSenderContext.builder()
+                .file    (file      )
+                .current ( aCurrent )
+                .count   ( aCount   )
+                .sender  ( sender   )
+                .metricsListener( metricsListener )
+                .build();
+
+        fileSender.sendFile(context);
+
+        metricsListener.didSenderDirSendFile(aCurrent, aCount);
+    }
+
     private void archiveFile(File aFile, int current, int count) {
         LOG.debug("Archiving file ({}/{}) {}...", aFile, current, count);
         retention.archiveFile(aFile);
         metricsListener.didSenderDirArchiveFile();
-    }
-
-    private void sendFile(File aFile, int current, int count) throws IOException {
-        LOG.debug("Sending file {} ...", aFile.getAbsolutePath());
-        try(LineNumberReader in = new LineNumberReader(new InputStreamReader(Files.newInputStream(aFile.toPath()), UTF_8))) {
-            String line;
-            while( (line = in.readLine()) != null) {
-                LOG.debug("Sending line {}:{} ({}/{})...", aFile.getName(), in.getLineNumber(), current, count);
-                sender.sendMessage(line);
-                metricsListener.didSenderDirSendLineSuccess();
-            }
-        }
-        metricsListener.didSenderDirSendFile(current, count);
     }
 
     private List<File> createFileListForDirProcess() {
