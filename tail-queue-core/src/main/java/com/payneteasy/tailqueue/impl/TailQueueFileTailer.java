@@ -6,13 +6,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.LineNumberReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.util.Optional;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.Files.newInputStream;
 
 public class TailQueueFileTailer {
 
@@ -44,7 +43,7 @@ public class TailQueueFileTailer {
     private void tailFile(File aFile) throws InterruptedException {
         LOG.debug("Start tailing file {} ...", aFile.getAbsolutePath());
         
-        try (LineNumberReader in = new LineNumberReader(new InputStreamReader(Files.newInputStream(aFile.toPath()), StandardCharsets.UTF_8))) {
+        try (TailQueueStrictLineReader in = new TailQueueStrictLineReader(new InputStreamReader(newInputStream(aFile.toPath()), UTF_8))) {
             while (!Thread.currentThread().isInterrupted()) {
 
                 String line = in.readLine();
