@@ -143,7 +143,16 @@ public class TailQueueWriterImpl implements ITailQueueWriter, Closeable {
                 return out;
             }
 
-            roll();
+            String oldBucket = currentBucket;
+
+            try {
+                roll();
+            } catch (IOException e) {
+                // publishing failed, but persisting the message matters more than the bucket name it
+                // ends up under: keep appending and let the next bucket change retry the rename
+                LOG.error("Cannot roll active file of bucket {}, keep appending to it", oldBucket, e);
+                return openActiveFile(oldBucket);
+            }
         }
 
         return openActiveFile(aBucket);
@@ -151,17 +160,44 @@ public class TailQueueWriterImpl implements ITailQueueWriter, Closeable {
 
     /**
      * Publishes the active file: forces it if needed and renames it to its bucket name.
+     * Does nothing when no message has been written yet.
+     * <p>
+     * Used for messages which must become visible to other tools immediately instead of waiting
+     * for the next bucket. A failure is logged and not thrown: the messages are durable in the
+     * active file, and the next roll or the startup recovery publishes them.
+     */
+    public synchronized void publishActiveFile() {
+        if (out == null) {
+            return;
+        }
+
+        try {
+            roll();
+        } catch (IOException e) {
+            LOG.error("Cannot publish active file {}", fileNames.activeFile(dir).getAbsolutePath(), e);
+        }
+    }
+
+    /**
+     * Publishes the active file: forces it if needed and renames it to its bucket name.
+     * Whatever fails, the writer is left with no open file, so the caller may reopen it.
      */
     private void roll() throws IOException {
         String bucket = currentBucket;
 
-        if (fsyncPolicy == EVERY_MESSAGE) {
-            out.getFD().sync();
+        try {
+            if (fsyncPolicy == EVERY_MESSAGE) {
+                out.getFD().sync();
+            }
+            out.close();
+        } catch (IOException e) {
+            // a file which could not be flushed must not be published as a closed one
+            closeQuietly();
+            throw e;
+        } finally {
+            out           = null;
+            currentBucket = null;
         }
-        out.close();
-
-        out           = null;
-        currentBucket = null;
 
         File active = fileNames.activeFile(dir);
         if (!active.isFile()) {

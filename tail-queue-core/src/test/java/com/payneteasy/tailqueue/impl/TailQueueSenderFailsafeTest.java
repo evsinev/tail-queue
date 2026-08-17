@@ -69,6 +69,21 @@ public class TailQueueSenderFailsafeTest {
         assertThat(dir.list()).containsExactly("20260817-1000.json");
     }
 
+    /**
+     * A dead letter must be visible to the ops tooling immediately, so it may not stay in the
+     * active file until the writer happens to roll it.
+     */
+    @Test
+    public void aDivertedMessageIsPublishedAsAClosedFile() throws IOException {
+        createFailsafe(1).sendMessage("dead letter");
+
+        assertThat(failsafeDir.list())
+                .hasSize(1)
+                .allMatch(aName -> aName.matches("\\d{8}-\\d{4}\\.json"), "closed bucket file");
+
+        assertThat(failsafeLines()).containsExactly("dead letter");
+    }
+
     @Test
     public void failsafeWriteFailurePropagates() throws IOException {
         TailQueueSenderFailsafe failsafe = createFailsafe(1);

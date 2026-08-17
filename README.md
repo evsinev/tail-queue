@@ -34,6 +34,10 @@ supported and will corrupt the delivery guarantees.
 `.open` and `.failed` files are never sent or deleted by the sender. The `.failed` case is also
 reported through the metrics listener (`didSenderDirQuarantineFile`).
 
+A message which could not be sent at all is written to the failsafe dir and published there
+immediately, so that dir contains closed files only and never an `.open` file - a tool scanning it
+for dead letters sees every message as soon as it is written.
+
 ## How to add it into your app
 
 ### Maven

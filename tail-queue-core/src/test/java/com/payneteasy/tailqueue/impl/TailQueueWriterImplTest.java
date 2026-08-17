@@ -3,6 +3,8 @@ package com.payneteasy.tailqueue.impl;
 import com.payneteasy.tailqueue.TailQueueFsyncPolicy;
 import com.payneteasy.tailqueue.TailQueueRollCycle;
 import com.payneteasy.tailqueue.TailQueueWriteException;
+import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -35,6 +37,12 @@ public class TailQueueWriterImplTest {
         dir     = temporaryFolder.newFolder("queue");
         clock   = new MutableClock("2026-08-17T10:00:00Z");
         metrics = new CountingMetricsListener();
+    }
+
+    @After
+    public void makeDirWritableAgain() {
+        //noinspection ResultOfMethodCallIgnored
+        dir.setWritable(true);
     }
 
     @Test
@@ -91,6 +99,30 @@ public class TailQueueWriterImplTest {
         // the second roll into the 10:01 bucket got its own name instead of overwriting the first one
         assertThat(linesOf("20260817-1001-1.json")).containsExactly("at 10:01 again");
         assertThat(linesOf(ACTIVE_FILE)).containsExactly("at 10:02");
+
+        writer.close();
+    }
+
+    /**
+     * Publishing a file is best effort, persisting a message is not: a rename which fails may not
+     * cost the message that triggered the roll.
+     */
+    @Test
+    public void aFailedRollKeepsTheMessageInTheActiveFile() {
+        TailQueueWriterImpl writer = createWriter();
+
+        writer.writeMessage("before the failed roll");
+
+        // renaming needs a writable dir, appending to the already open active file does not
+        Assume.assumeTrue("cannot make the queue dir read only", dir.setWritable(false) && !dir.canWrite());
+
+        clock.plusMinutes(1);
+        writer.writeMessage("after the failed roll");
+
+        assertThat(linesOf(ACTIVE_FILE)).containsExactly("before the failed roll", "after the failed roll");
+        assertThat(dir.list()).containsExactly(ACTIVE_FILE);
+        assertThat(metrics.writeMessageSuccess).isEqualTo(2);
+        assertThat(metrics.writeMessageError).isZero();
 
         writer.close();
     }

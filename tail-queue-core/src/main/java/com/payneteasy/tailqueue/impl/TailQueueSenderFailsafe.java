@@ -68,6 +68,10 @@ public class TailQueueSenderFailsafe implements ITailQueueSender {
 
         LOG.warn("Writing failed message to {} dir", failsafeDir.getAbsolutePath());
         failWriter.writeMessage(aLine);
+
+        // dead letters must be visible to the ops tooling right away and not wait for the next
+        // bucket, so the failsafe dir contains closed files only
+        failWriter.publishActiveFile();
     }
 
     private void sleepBetweenAttempts() throws InterruptedException {
