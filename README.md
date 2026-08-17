@@ -35,8 +35,9 @@ supported and will corrupt the delivery guarantees.
 reported through the metrics listener (`didSenderDirQuarantineFile`).
 
 A message which could not be sent at all is written to the failsafe dir and published there
-immediately, so that dir contains closed files only and never an `.open` file - a tool scanning it
-for dead letters sees every message as soon as it is written.
+immediately, so a tool scanning that dir for dead letters sees every message as soon as it is
+written. If publishing fails, the message stays durable in the `.open` file and is published again
+on the next dead letter or at startup.
 
 ## How to add it into your app
 

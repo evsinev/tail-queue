@@ -36,6 +36,13 @@ On startup, a stale active file left by a previous crash SHALL be closed (rename
 
 When all send attempts fail, the failsafe sender SHALL durably write the message to the failsafe directory. If that write also fails, the failsafe sender SHALL throw so the owning cycle does not archive the source file. Thread interruption during retries SHALL preserve the interrupt flag.
 
+The failsafe sender SHALL publish each written message as a closed file immediately instead of waiting for the next bucket, so that a tool scanning the failsafe directory observes every dead letter as soon as it has been written. A failure to publish SHALL NOT be reported to the caller, because the message is already durable; it is retried on the next dead letter or by the startup recovery.
+
+#### Scenario: Dead letter is visible immediately
+
+- WHEN the delegate sender fails all attempts and the message is written to the failsafe directory
+- THEN the failsafe directory contains that message in a closed bucket file, with no active file left behind
+
 #### Scenario: Failsafe directory is unwritable
 
 - WHEN the delegate sender fails all attempts and the failsafe write fails (e.g., disk full)
