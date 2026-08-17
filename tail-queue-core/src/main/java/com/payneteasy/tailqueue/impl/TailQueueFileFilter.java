@@ -3,23 +3,25 @@ package com.payneteasy.tailqueue.impl;
 import java.io.File;
 import java.io.FileFilter;
 
+/**
+ * Accepts only closed queue files: the active ({@code .open}) file the writer is appending to
+ * and quarantined ({@code .failed}) files are never consumed by the sender.
+ */
 public class TailQueueFileFilter implements FileFilter {
 
-    private final String prefix;
-    private final String suffix;
+    private final TailQueueFileNames fileNames;
 
     public TailQueueFileFilter(String prefix, String suffix) {
-        this.prefix = prefix;
-        this.suffix = suffix;
+        this(new TailQueueFileNames(prefix, suffix));
+    }
+
+    public TailQueueFileFilter(TailQueueFileNames fileNames) {
+        this.fileNames = fileNames;
     }
 
     @Override
     public boolean accept(File aFile) {
-        String filename = aFile.getName();
-
-        return     aFile.isFile()
-                && filename.startsWith(prefix)
-                && filename.endsWith  (suffix);
+        return aFile.isFile() && fileNames.isClosedFile(aFile);
     }
 
 }

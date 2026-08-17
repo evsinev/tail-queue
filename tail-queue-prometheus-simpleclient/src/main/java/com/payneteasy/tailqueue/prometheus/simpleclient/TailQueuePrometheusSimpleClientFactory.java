@@ -10,6 +10,7 @@ public class TailQueuePrometheusSimpleClientFactory {
     private final Counter writeMessageError            = counter ("write_message_error");
     private final Counter senderTaskErrorProcessingDir = counter ("sender_task_processing_dir_error");
     private final Counter senderDirArchiveFile         = counter ("sender_dir_archive_file");
+    private final Counter senderDirQuarantineFile      = counter ("sender_dir_quarantine_file");
     private final Gauge   senderDirSendFileCurrent     = gauge   ("sender_dir_send_file_current");
     private final Gauge   senderDirSendFileCount       = gauge   ("sender_dir_send_file_count");
     private final Gauge   senderDirFilesCount          = gauge   ("sender_dir_files_count");
@@ -46,6 +47,7 @@ public class TailQueuePrometheusSimpleClientFactory {
                 , writeMessageError.labels(aName)
                 , senderTaskErrorProcessingDir.labels(aName)
                 , senderDirArchiveFile.labels(aName)
+                , senderDirQuarantineFile.labels(aName)
                 , senderDirSendFileCurrent.labels(aName)
                 , senderDirSendFileCount.labels(aName)
                 , senderDirFilesCount.labels(aName)
