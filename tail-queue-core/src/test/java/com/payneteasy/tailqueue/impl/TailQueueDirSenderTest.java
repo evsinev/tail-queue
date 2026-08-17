@@ -2,6 +2,8 @@ package com.payneteasy.tailqueue.impl;
 
 import com.payneteasy.tailqueue.ITailQueueRetention;
 import com.payneteasy.tailqueue.ITailQueueSender;
+import com.payneteasy.tailqueue.TailQueueDuplicatePolicy;
+import com.payneteasy.tailqueue.impl.util.FileKeys;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
@@ -92,7 +94,50 @@ public class TailQueueDirSenderTest {
         assertThat(metrics.senderDirQuarantineFile).isEqualTo(1);
     }
 
+    /**
+     * A file the tailer never read is sent in full even when the queue skips the files it did read.
+     */
+    @Test
+    public void sendsAFileWhichTheTailerNeverRead() throws IOException {
+        write("20260817-1000.json"          , "first\n" );
+        write("20260817-1001-recovered.json", "second\n");
+
+        TailQueueDeliveredFiles deliveredFiles = new TailQueueDeliveredFiles(TailQueueDuplicatePolicy.SKIP);
+
+        createDirSender(new TailQueueRetentionDeleteFile(), deliveredFiles).processDir();
+
+        assertThat(sentLines).containsExactly("first", "second");
+        assertThat(metrics.senderDirSkipFile).isZero();
+        assertThat(metrics.senderDirArchiveFile).isEqualTo(2);
+    }
+
+    /**
+     * Retention treats a file delivered by the tailer exactly like one the dir sender itself sent,
+     * so a file which cannot be archived is quarantined instead of being sent on a later cycle.
+     */
+    @Test
+    public void quarantinesAFileDeliveredByTheTailer() throws IOException {
+        write("20260817-1000.json", "first\n");
+
+        TailQueueDeliveredFiles deliveredFiles = new TailQueueDeliveredFiles(TailQueueDuplicatePolicy.SKIP);
+        deliveredFiles.add(FileKeys.fileKeyOf(new File(dir, "20260817-1000.json")));
+
+        TailQueueDirSender dirSender = createDirSender(aFile -> { /* retention silently does nothing */ }, deliveredFiles);
+
+        dirSender.processDir();
+        dirSender.processDir();
+
+        assertThat(sentLines).as("the tailer had already delivered it").isEmpty();
+        assertThat(dir.list()).containsExactly("20260817-1000.json.failed");
+        assertThat(metrics.senderDirSkipFile).isEqualTo(1);
+        assertThat(metrics.senderDirQuarantineFile).isEqualTo(1);
+    }
+
     private TailQueueDirSender createDirSender(ITailQueueRetention aRetention) {
+        return createDirSender(aRetention, new TailQueueDeliveredFiles(TailQueueDuplicatePolicy.RESEND));
+    }
+
+    private TailQueueDirSender createDirSender(ITailQueueRetention aRetention, TailQueueDeliveredFiles aDeliveredFiles) {
         ITailQueueSender sender = aLine -> sentLines.add(aLine);
 
         return new TailQueueDirSender(
@@ -102,6 +147,8 @@ public class TailQueueDirSenderTest {
                 , aRetention
                 , metrics
                 , new TailQueueFileSenderImpl()
+                , FileKeys.SYSTEM
+                , aDeliveredFiles
         );
     }
 

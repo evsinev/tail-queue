@@ -1,6 +1,8 @@
 package com.payneteasy.tailqueue;
 
 import com.payneteasy.tailqueue.impl.*;
+import com.payneteasy.tailqueue.impl.util.FileKeys;
+import com.payneteasy.tailqueue.impl.util.IFileKeyResolver;
 
 import java.io.File;
 import java.time.Clock;
@@ -24,7 +26,9 @@ public class TailQueueBuilder {
     private ITailQueueFileSender      fileSender          = new TailQueueFileSenderImpl();
     private boolean                   strictWrites        = false;
     private TailQueueFsyncPolicy      fsyncPolicy         = TailQueueFsyncPolicy.NONE;
+    private TailQueueDuplicatePolicy  duplicatePolicy     = TailQueueDuplicatePolicy.RESEND;
     private Clock                     clock               = Clock.systemUTC();
+    private IFileKeyResolver          fileKeys            = FileKeys.SYSTEM;
 
     public TailQueueBuilder sender(ITailQueueSender sender) {
         this.sender = sender;
@@ -97,10 +101,33 @@ public class TailQueueBuilder {
     }
 
     /**
+     * @param duplicatePolicy {@link TailQueueDuplicatePolicy#SKIP} stops the dir sender from sending
+     *                        a file the tailer has already delivered in full, which makes delivery
+     *                        one copy per message in the normal case. Default is
+     *                        {@link TailQueueDuplicatePolicy#RESEND}, today's two copies.
+     *                        <p>
+     *                        The {@code sender_dir_skip_file} metric counts the files skipped, so a
+     *                        flat zero on a busy queue means the mode is not taking effect.
+     */
+    public TailQueueBuilder duplicatePolicy(TailQueueDuplicatePolicy duplicatePolicy) {
+        this.duplicatePolicy = duplicatePolicy;
+        return this;
+    }
+
+    /**
      * @param clock source of time for the roll cycle buckets. For tests.
      */
     public TailQueueBuilder clock(Clock clock) {
         this.clock = clock;
+        return this;
+    }
+
+    /**
+     * @param fileKeys how the sender identifies a file across a rename. For tests: production uses
+     *                 {@link FileKeys#SYSTEM}.
+     */
+    TailQueueBuilder fileKeys(IFileKeyResolver fileKeys) {
+        this.fileKeys = fileKeys;
         return this;
     }
 
@@ -109,6 +136,8 @@ public class TailQueueBuilder {
         requireNonNull(dir, "Dir is null");
 
         mkDirs(dir);
+
+        checkFileKeysAreSupported();
 
         // the writer recovers a stale active file left by a crash, so it must be created
         // before the sender task is able to process the directory
@@ -131,10 +160,30 @@ public class TailQueueBuilder {
         );
     }
 
+    /**
+     * The sender identifies a file across the rename by which the writer publishes it: the tailer
+     * needs it to tell its own rolled file from an unrelated closed file, and {@code SKIP} needs it
+     * to recognize a file it has already delivered.
+     * <p>
+     * Without file keys the tailer refuses to open the active file at all, so nothing would be
+     * delivered live and every message would wait for its file to be rolled. That is a silent
+     * latency regression rather than a loss, and the queue refuses to start instead of hiding it.
+     */
+    private void checkFileKeysAreSupported() {
+        if (fileKeys.fileKeyOf(dir) != null) {
+            return;
+        }
+
+        throw new IllegalStateException("The filesystem of " + dir.getAbsolutePath()
+                + " does not expose file keys, which the sender needs to identify a file across a"
+                + " rename. Duplicate policy " + duplicatePolicy + " cannot be honored on it.");
+    }
+
     private TailQueueSenderTask createSenderTask() {
 
-        TailQueueFileNames  fileNames  = new TailQueueFileNames(filePrefix, fileSuffix);
-        TailQueueFileFilter fileFilter = new TailQueueFileFilter(fileNames);
+        TailQueueFileNames      fileNames      = new TailQueueFileNames(filePrefix, fileSuffix);
+        TailQueueFileFilter     fileFilter     = new TailQueueFileFilter(fileNames);
+        TailQueueDeliveredFiles deliveredFiles = new TailQueueDeliveredFiles(duplicatePolicy);
 
         TailQueueDirSender dirSender = new TailQueueDirSender(
                 dir
@@ -143,6 +192,8 @@ public class TailQueueBuilder {
                 , retention
                 , metricsListener
                 , fileSender
+                , fileKeys
+                , deliveredFiles
         );
 
         TailQueueFileTailer fileTailer = new TailQueueFileTailer(
@@ -152,6 +203,8 @@ public class TailQueueBuilder {
                 , fileNames
                 , liveWaitDuration
                 , metricsListener
+                , fileKeys
+                , deliveredFiles
         );
 
         return new TailQueueSenderTask(

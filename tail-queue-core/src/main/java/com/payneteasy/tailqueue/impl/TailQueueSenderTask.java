@@ -33,6 +33,10 @@ public class TailQueueSenderTask implements Runnable {
 
         while (!currentThread().isInterrupted()) {
             try {
+                // a file rolled while tailing was idle must be accounted for before the dir sender
+                // sees it, or it is sent twice
+                fileTailer.finishPendingRoll();
+
                 dirSender.processDir();
 
                 fileTailer.tailOneFile();
@@ -50,6 +54,10 @@ public class TailQueueSenderTask implements Runnable {
                 metricsListener.didSenderTaskErrorProcessingDir();
             }
         }
+
+        // the tailer holds the active file open between cycles
+        fileTailer.close();
+
         LOG.debug("Exited from sender task");
     }
 }

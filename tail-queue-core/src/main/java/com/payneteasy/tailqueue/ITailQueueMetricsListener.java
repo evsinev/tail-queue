@@ -19,6 +19,14 @@ public interface ITailQueueMetricsListener {
 
     void didSenderDirSendFile(int current, int count);
 
+    /**
+     * A closed file was archived without being sent, because the tailer had already delivered every
+     * line of it. Only happens with {@link TailQueueDuplicatePolicy#SKIP}, where a flat zero while
+     * the queue is busy means the mode is not taking effect.
+     */
+    default void didSenderDirSkipFile() {
+    }
+
     void didSenderDirFilesCount(int aCount);
 
     void didSenderFileError();

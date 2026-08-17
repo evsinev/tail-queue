@@ -1,7 +1,9 @@
 package com.payneteasy.tailqueue.impl;
 
 import com.payneteasy.tailqueue.ITailQueueSender;
+import com.payneteasy.tailqueue.TailQueueDuplicatePolicy;
 import com.payneteasy.tailqueue.TailQueueWriteException;
+import com.payneteasy.tailqueue.impl.util.FileKeys;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -60,6 +62,8 @@ public class TailQueueSenderFailsafeTest {
                 , new TailQueueRetentionDeleteFile()
                 , new TailQueueMetricsListenerListenerNoOp()
                 , new TailQueueFileSenderImpl()
+                , FileKeys.SYSTEM
+                , new TailQueueDeliveredFiles(TailQueueDuplicatePolicy.RESEND)
         );
 
         assertThatThrownBy(dirSender::processDir)

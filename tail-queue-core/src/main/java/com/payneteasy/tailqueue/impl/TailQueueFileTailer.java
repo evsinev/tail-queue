@@ -2,17 +2,32 @@ package com.payneteasy.tailqueue.impl;
 
 import com.payneteasy.tailqueue.ITailQueueMetricsListener;
 import com.payneteasy.tailqueue.ITailQueueSender;
+import com.payneteasy.tailqueue.impl.util.IFileKeyResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.NoSuchFileException;
 import java.time.Duration;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.Files.newInputStream;
 
-public class TailQueueFileTailer {
+/**
+ * Tails the active file the writer is appending to. The file is only ever read: it is
+ * published by the writer itself, and only then sent and archived by the dir sender.
+ * <p>
+ * The reader is kept between calls, for as long as the file it reads exists, so that a line is
+ * never delivered twice because tailing yielded and resumed. When the writer rolls that file, the
+ * tailer drains it to its end of file and records it as delivered, which lets the dir sender in
+ * {@link com.payneteasy.tailqueue.TailQueueDuplicatePolicy#SKIP} archive it without sending its
+ * lines again. The record is written before the tailer yields, because the dir sender runs first in
+ * the sender cycle and would otherwise send the file before hearing about it.
+ */
+public class TailQueueFileTailer implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger( TailQueueFileTailer.class );
 
@@ -21,48 +36,148 @@ public class TailQueueFileTailer {
     private final TailQueueFileFilter       fileFilter;
     private final TailQueueFileNames        fileNames;
     private final Duration                  lineDuration;
-    private final ITailQueueMetricsListener metricsListener;
+    private final ITailQueueMetricsListener  metricsListener;
+    private final IFileKeyResolver          fileKeys;
+    private final TailQueueDeliveredFiles   deliveredFiles;
 
-    public TailQueueFileTailer(File dir, ITailQueueSender sender, TailQueueFileFilter fileFilter, TailQueueFileNames fileNames, Duration lineDuration, ITailQueueMetricsListener metricsListener) {
+    private TailQueueStrictLineReader reader;
+    private Object                    readerFileKey;
+    private String                    readerFileName;
+
+    public TailQueueFileTailer(
+              File                      dir
+            , ITailQueueSender          sender
+            , TailQueueFileFilter       fileFilter
+            , TailQueueFileNames        fileNames
+            , Duration                  lineDuration
+            , ITailQueueMetricsListener metricsListener
+            , IFileKeyResolver          fileKeys
+            , TailQueueDeliveredFiles   deliveredFiles
+    ) {
         this.dir             = dir;
         this.sender          = sender;
         this.fileFilter      = fileFilter;
         this.fileNames       = fileNames;
         this.lineDuration    = lineDuration;
         this.metricsListener = metricsListener;
+        this.fileKeys        = fileKeys;
+        this.deliveredFiles  = deliveredFiles;
     }
 
-    /**
-     * Tails the active file the writer is appending to. The file is only ever read: it is
-     * published by the writer itself, and only then sent and archived by the dir sender.
-     */
     public void tailOneFile() throws InterruptedException {
-        File active = fileNames.activeFile(dir);
-
-        if (!active.isFile()) {
+        if (reader == null && !openActiveFile()) {
             return;
         }
 
-        tailFile(active);
+        tailFile();
     }
 
-    private void tailFile(File aFile) throws InterruptedException {
-        LOG.debug("Start tailing file {} ...", aFile.getAbsolutePath());
-        
-        try (TailQueueStrictLineReader in = new TailQueueStrictLineReader(new InputStreamReader(newInputStream(aFile.toPath()), UTF_8))) {
+    /**
+     * Finishes a file which the writer rolled while tailing was idle, before the dir sender looks at
+     * the directory. The dir sender runs first in the sender cycle, so a file it finds before hearing
+     * that the tailer had delivered it would be sent a second time, and the record written afterwards
+     * would name a file which no longer exists.
+     */
+    public void finishPendingRoll() {
+        if (reader == null || !wasRolled()) {
+            return;
+        }
+
+        try {
+            finishRolledFile();
+        } catch (Exception e) {
+            LOG.error("Cannot finish the rolled file {}", readerFileName, e);
+            metricsListener.didSenderFileError();
+            close();
+        }
+    }
+
+    /**
+     * Releases the file descriptor and forgets the position, so the file is delivered from its
+     * first line again. Called when the sender stops and when delivery of a line failed.
+     */
+    @Override
+    public void close() {
+        if (reader == null) {
+            return;
+        }
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            LOG.debug("Cannot close the tailed file {}", readerFileName, e);
+        } finally {
+            reader         = null;
+            readerFileKey  = null;
+            readerFileName = null;
+        }
+    }
+
+    private boolean openActiveFile() {
+        File   active = fileNames.activeFile(dir);
+        Object before = fileKeys.fileKeyOf(active);
+
+        if (before == null) {
+            return false;
+        }
+
+        TailQueueStrictLineReader in;
+        try {
+            in = new TailQueueStrictLineReader(new InputStreamReader(newInputStream(active.toPath()), UTF_8));
+        } catch (NoSuchFileException e) {
+            // the writer rolled the file between reading its key and opening it, which the next cycle
+            // handles by opening the new active file: not an error
+            LOG.debug("File {} was rolled before it could be opened", active.getAbsolutePath());
+            return false;
+        } catch (IOException e) {
+            LOG.error("Cannot open file {}", active.getAbsolutePath(), e);
+            metricsListener.didSenderFileError();
+            return false;
+        }
+
+        // the writer may have rolled the file between the two calls: the reader would then hold one
+        // file while its key names another one, and recording that key as delivered would make the
+        // dir sender skip a file nobody has read
+        if (!before.equals(fileKeys.fileKeyOf(active))) {
+            LOG.debug("File {} was rolled while being opened, tailing it on a later cycle", active.getAbsolutePath());
+            closeQuietly(in);
+            return false;
+        }
+
+        reader         = in;
+        readerFileKey  = before;
+        readerFileName = active.getName();
+
+        LOG.debug("Start tailing file {} ...", active.getAbsolutePath());
+
+        return true;
+    }
+
+    private void tailFile() throws InterruptedException {
+        try {
             while (!Thread.currentThread().isInterrupted()) {
 
-                String line = in.readLine();
+                String line = reader.readLine();
 
                 if (line != null) {
-                    LOG.debug("Send line {}:{} ...", aFile.getName(), in.getLineNumber());
-                    sender.sendMessage(line);
-                    metricsListener.didSenderFileSendLine(in.getLineNumber());
-                    metricsListener.didSenderFileSendLineSuccess();
+                    sendLine(line);
                     continue;
                 }
 
+                if (!reader.isEndOfFile()) {
+                    // not the end of the file: either an empty line, which the tailer does not
+                    // deliver, or a line longer than what the reader returns in one call. Both made
+                    // progress, so reading on cannot spin
+                    continue;
+                }
+
+                if (wasRolled()) {
+                    finishRolledFile();
+                    return;
+                }
+
                 if (hasClosedFile()) {
+                    // the dir sender has work to do; the reader keeps its position in the active file
                     LOG.debug("Found a closed file. Exiting ...");
                     return;
                 }
@@ -70,12 +185,119 @@ public class TailQueueFileTailer {
                 sleepForNewLine();
             }
         } catch (InterruptedException e) {
-            LOG.warn("Tailing file interrupted {}", aFile.getAbsolutePath());
+            LOG.warn("Tailing file interrupted {}", readerFileName);
             throw e;
         } catch (Exception e) {
-            LOG.error("Cannot process file {}", aFile.getAbsolutePath(), e);
+            // the position is dropped on purpose: the dir sender sends the whole file, which costs
+            // duplicates for the lines already delivered and loses none of the ones which failed
+            LOG.error("Cannot process file {}", readerFileName, e);
             metricsListener.didSenderFileError();
+            close();
         }
+    }
+
+    private void sendLine(String aLine) {
+        LOG.debug("Send line {}:{} ...", readerFileName, reader.getLineNumber());
+
+        sender.sendMessage(aLine);
+
+        metricsListener.didSenderFileSendLine(reader.getLineNumber());
+        metricsListener.didSenderFileSendLineSuccess();
+    }
+
+    /**
+     * @return true if the file the reader holds is no longer the active file, which means the writer
+     *         has published it under its bucket name
+     */
+    private boolean wasRolled() {
+        File   active    = fileNames.activeFile(dir);
+        Object activeKey = fileKeys.fileKeyOf(active);
+
+        if (activeKey != null) {
+            return !activeKey.equals(readerFileKey);
+        }
+
+        // no key: the file is either gone, which means it was rolled, or its attributes could not be
+        // read this time. Answering "rolled" for a file the writer still appends to would record it as
+        // delivered and lose everything appended afterwards, so only its absence counts
+        if (active.exists()) {
+            LOG.warn("Cannot read the file key of {}, assuming it is still the active file", active.getAbsolutePath());
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * The writer appends and only then renames, so lines may have arrived after the last read: the
+     * file is drained to its real end before it counts as delivered.
+     * <p>
+     * Whatever stops the drain short of that - an interrupt, or a last line without its terminating
+     * new line, which this reader keeps in its buffer and would never hand out - leaves the file
+     * unrecorded, so the dir sender sends it in full. That costs duplicates for the lines already
+     * delivered and loses none.
+     */
+    private void finishRolledFile() throws IOException {
+        String line;
+        while ((line = reader.readLine()) != null || !reader.isEndOfFile()) {
+
+            if (Thread.currentThread().isInterrupted()) {
+                LOG.warn("Interrupted while draining the rolled file {}, it will be sent as a whole", readerFileName);
+                close();
+                return;
+            }
+
+            if (line != null) {
+                sendLine(line);
+            }
+        }
+
+        if (reader.hasPartialLine()) {
+            LOG.warn("Rolled file {} does not end with a new line, sending it as a whole", readerFileName);
+            close();
+            return;
+        }
+
+        LOG.debug("File {} was rolled, delivered {} lines of it", readerFileName, reader.getLineNumber());
+
+        recordDelivered();
+
+        close();
+    }
+
+    /**
+     * A record may only be written for a file which is still waiting for the dir sender. A file key is
+     * the identity of an existing file: once the file is gone, the filesystem is free to hand the same
+     * key to a new one, and a record nobody consumes would make the dir sender archive that new file
+     * without sending it.
+     */
+    private void recordDelivered() {
+        if (!deliveredFiles.isEnabled()) {
+            return;
+        }
+
+        if (!isWaitingForTheDirSender(readerFileKey)) {
+            LOG.debug("File {} is no longer in the queue dir, not recording it as delivered", readerFileName);
+            return;
+        }
+
+        deliveredFiles.add(readerFileKey);
+    }
+
+    private boolean isWaitingForTheDirSender(Object aFileKey) {
+        File[] files = dir.listFiles(fileFilter);
+
+        if (files == null) {
+            return false;
+        }
+
+        for (File file : files) {
+            if (aFileKey.equals(fileKeys.fileKeyOf(file))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void sleepForNewLine() throws InterruptedException {
@@ -89,6 +311,14 @@ public class TailQueueFileTailer {
     private boolean hasClosedFile() {
         File[] files = dir.listFiles(fileFilter);
         return files != null && files.length >= 1;
+    }
+
+    private static void closeQuietly(TailQueueStrictLineReader aReader) {
+        try {
+            aReader.close();
+        } catch (IOException e) {
+            LOG.debug("Cannot close a reader", e);
+        }
     }
 
 }

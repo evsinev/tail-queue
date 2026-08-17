@@ -4,8 +4,11 @@ import com.payneteasy.tailqueue.ITailQueue;
 import com.payneteasy.tailqueue.ITailQueueSender;
 import com.payneteasy.tailqueue.ITailQueueWriter;
 import com.payneteasy.tailqueue.TailQueueBuilder;
+import com.payneteasy.tailqueue.TailQueueDuplicatePolicy;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,9 +27,20 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End to end checks for the "no message is lost" property.
+ * End to end checks for the "no message is lost" property. Both duplicate policies are checked: how
+ * many copies a message gets is a choice, but every message must be delivered at least once whatever
+ * the choice is.
  */
+@RunWith(Parameterized.class)
 public class TailQueueMessageLossTest {
+
+    @Parameterized.Parameters(name = "{0}")
+    public static TailQueueDuplicatePolicy[] policies() {
+        return TailQueueDuplicatePolicy.values();
+    }
+
+    @Parameterized.Parameter
+    public TailQueueDuplicatePolicy policy;
 
     private static final Logger LOG = LoggerFactory.getLogger(TailQueueMessageLossTest.class);
 
@@ -40,7 +54,7 @@ public class TailQueueMessageLossTest {
 
     @Before
     public void setUp() {
-        dir       = new File("target/message-loss/" + System.currentTimeMillis());
+        dir       = new File("target/message-loss/" + policy + "-" + System.currentTimeMillis());
         clock     = new TestClock(Instant.parse("2026-08-17T10:00:00Z"));
         delivered = ConcurrentHashMap.newKeySet();
     }
@@ -113,6 +127,7 @@ public class TailQueueMessageLossTest {
                 .dir(dir)
                 .sender(sender)
                 .clock(clock)
+                .duplicatePolicy(policy)
                 .liveWaitDuration(WAIT)
                 .dirListWaitDuration(WAIT)
                 .build();

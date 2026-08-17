@@ -1,6 +1,7 @@
 package com.payneteasy.tailqueue.impl;
 
 import com.payneteasy.tailqueue.*;
+import com.payneteasy.tailqueue.impl.util.IFileKeyResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,17 +26,30 @@ public class TailQueueDirSender {
     private final ITailQueueRetention       retention;
     private final ITailQueueMetricsListener metricsListener;
     private final ITailQueueFileSender      fileSender;
+    private final IFileKeyResolver          fileKeys;
+    private final TailQueueDeliveredFiles   deliveredFiles;
 
     /** files which were sent but could neither be archived nor quarantined; never sent again */
     private final Set<String> sentFiles = new HashSet<>();
 
-    public TailQueueDirSender(File dir, TailQueueFileFilter fileFilter, ITailQueueSender sender, ITailQueueRetention retention, ITailQueueMetricsListener metricsListener, ITailQueueFileSender fileSender) {
+    public TailQueueDirSender(
+              File                      dir
+            , TailQueueFileFilter       fileFilter
+            , ITailQueueSender          sender
+            , ITailQueueRetention       retention
+            , ITailQueueMetricsListener metricsListener
+            , ITailQueueFileSender      fileSender
+            , IFileKeyResolver          fileKeys
+            , TailQueueDeliveredFiles   deliveredFiles
+    ) {
         this.dir             = dir;
         this.fileFilter      = fileFilter;
         this.sender          = sender;
         this.retention       = retention;
         this.metricsListener = metricsListener;
         this.fileSender      = fileSender;
+        this.fileKeys        = fileKeys;
+        this.deliveredFiles  = deliveredFiles;
     }
 
     void processDir() {
@@ -52,15 +66,40 @@ public class TailQueueDirSender {
 
             File file = filesToProcess.get(i);
 
-            try {
-                LOG.debug("Sending file {} ...", file.getAbsolutePath());
-                sendFile(file, i, count);
-            } catch (Exception e) {
-                throw new IllegalStateException("Cannot process file " + file.getAbsolutePath(), e);
+            if (wasDeliveredByTailer(file)) {
+                LOG.debug("File {} was already delivered by the tailer, archiving it without sending", file.getAbsolutePath());
+                metricsListener.didSenderDirSkipFile();
+            } else {
+                try {
+                    LOG.debug("Sending file {} ...", file.getAbsolutePath());
+                    sendFile(file, i, count);
+                } catch (Exception e) {
+                    throw new IllegalStateException("Cannot process file " + file.getAbsolutePath(), e);
+                }
             }
 
             archiveFile(file, i, count);
         }
+    }
+
+    /**
+     * A file which the tailer read to its end of file has already been delivered line by line, so
+     * only retention is left to do. The queue resends every file unless it was built with
+     * {@link com.payneteasy.tailqueue.TailQueueDuplicatePolicy#SKIP}.
+     */
+    private boolean wasDeliveredByTailer(File aFile) {
+        if (!deliveredFiles.isEnabled()) {
+            return false;
+        }
+
+        Object fileKey = fileKeys.fileKeyOf(aFile);
+
+        if (fileKey == null) {
+            LOG.warn("Cannot resolve the file key of {}, sending it again", aFile.getAbsolutePath());
+            return false;
+        }
+
+        return deliveredFiles.consume(fileKey);
     }
 
     private void sendFile(File file, int aCurrent, int aCount) throws IOException {
