@@ -50,7 +50,7 @@ public class TailQueueMetricsListenerPrometheusSimpleClient implements ITailQueu
     @Override
     public void didSenderDirSendFile(int current, int count) {
         senderDirSendFileCurrent.set(current);
-        senderDirSendFileCount.set(current);
+        senderDirSendFileCount.set(count);
     }
 
     @Override
