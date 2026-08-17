@@ -55,12 +55,22 @@ The sender SHALL NOT deliver a line of a file twice because the tailer stopped r
 
 ### Requirement: Deduplication never trades away durability
 
-A file SHALL be treated as delivered by the tailer only if every line up to its end of file was accepted by the sender. If delivery of any line failed, the file SHALL be sent in full by the dir sender even in `SKIP` mode.
+A file SHALL be treated as delivered by the tailer only if every line up to its end of file was accepted by the sender. If delivery of any line failed, or if the tailer stopped before the end of the file, or if the file ends with content the tailer does not deliver as a line, the file SHALL be sent in full by the dir sender even in `SKIP` mode.
 
 #### Scenario: Send fails in the middle of the active file
 
 - **WHEN** the tailer fails to deliver a line of the active file (the send path, including the failsafe, reports an error) and the file is later rolled
 - **THEN** the dir sender sends that file in full, so the failed message is delivered, accepting duplicates for the lines that had already been delivered
+
+#### Scenario: Rolled file does not end with a complete line
+
+- **WHEN** a file is published whose last bytes are not terminated as a line, so the tailer has never handed that content to the sender
+- **THEN** the dir sender sends that file in full, so the unterminated content is delivered as its own line, and the file is not counted as delivered by the tailer
+
+#### Scenario: Shutdown while the rolled file is being drained
+
+- **WHEN** the sender is stopped while the tailer is still delivering the lines of a file which has just been rolled
+- **THEN** the file is not counted as delivered, so the next run sends it in full instead of archiving lines nobody received
 
 ### Requirement: File identity is required and its absence fails fast
 

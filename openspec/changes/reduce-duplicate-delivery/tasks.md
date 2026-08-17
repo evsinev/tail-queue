@@ -40,7 +40,13 @@
 - [x] 6.7 Fail-fast: `build()` throws when the file key is unavailable, in both modes (simulate via the helper's seam, without requiring an exotic filesystem)
 - [x] 6.8 Run `mvn verify -Pintegration-test` and confirm the existing loss tests still pass in both modes
 
-## 7. Documentation
+## 7. Review follow-ups
 
-- [x] 7.1 Document both modes in `README.md`: the default, how to enable `SKIP`, that at-least-once and consumer idempotency still apply, and which metric proves the mode is working
-- [x] 7.2 Note in `README.md` that the sender needs a filesystem exposing a stable file key in both modes, that queue construction fails otherwise, and that this is breaking for such deployments
+- [x] 7.1 Add `TailQueueStrictLineReader.hasPartialLine()` and leave a rolled file unrecorded when its last line is not terminated, so the dir sender delivers that content instead of the file being archived with it undelivered
+- [x] 7.2 Check the interrupt flag while draining a rolled file: drop the record and stop, instead of pushing the remaining lines through the failsafe during shutdown
+- [x] 7.3 Test: a rolled file without a trailing new line is sent as a whole in `SKIP`
+
+## 8. Documentation
+
+- [x] 8.1 Document both modes in `README.md`: the default, how to enable `SKIP`, that at-least-once and consumer idempotency still apply, and which metric proves the mode is working
+- [x] 8.2 Note in `README.md` that the sender needs a filesystem exposing a stable file key in both modes, that queue construction fails otherwise, and that this is breaking for such deployments

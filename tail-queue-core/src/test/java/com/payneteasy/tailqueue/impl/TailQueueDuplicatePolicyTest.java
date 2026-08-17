@@ -166,6 +166,30 @@ public class TailQueueDuplicatePolicyTest {
     }
 
     /**
+     * The tailer keeps a line whose new line has not arrived in its buffer and never hands it out, so
+     * a rolled file which does not end with a new line has not been delivered in full and must be
+     * sent as a whole - otherwise archiving it would drop that last line.
+     */
+    @Test
+    public void aRolledFileWithoutATrailingNewLineIsSentAsAWhole() throws Exception {
+        usePolicy(SKIP);
+
+        write(ACTIVE, "first\nwithout-a-new-line");
+
+        createTailer(aLine -> {
+            sentLines.add(aLine);
+            roll(); // the writer publishes the file right after the first line
+        }).tailOneFile();
+
+        assertThat(sentLines).as("the partial line stays in the buffer").containsExactly("first");
+
+        createDirSender().processDir();
+
+        assertThat(sentLines).containsExactly("first", "first", "without-a-new-line");
+        assertThat(metrics.senderDirSkipFile).isZero();
+    }
+
+    /**
      * The record of what the tailer delivered lives in memory only, so a restart re-delivers a
      * partially tailed file instead of losing the lines which had not been delivered yet.
      */

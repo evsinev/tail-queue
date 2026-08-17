@@ -69,4 +69,14 @@ public class TailQueueStrictLineReader implements Closeable {
     public boolean isEndOfFile() {
         return endOfFile;
     }
+
+    /**
+     * @return true if the reader holds the beginning of a line whose terminating new line has not
+     *         arrived. At the end of a file which nobody appends to any more, that content is a line
+     *         this reader will never hand out, so a caller which counts the file as delivered must
+     *         ask before it does.
+     */
+    public boolean hasPartialLine() {
+        return buffer.length() > 0;
+    }
 }

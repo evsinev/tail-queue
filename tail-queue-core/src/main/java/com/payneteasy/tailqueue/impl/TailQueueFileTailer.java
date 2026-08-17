@@ -139,7 +139,9 @@ public class TailQueueFileTailer implements Closeable {
                 }
 
                 if (!reader.isEndOfFile()) {
-                    // an empty line, which the tailer does not deliver, and not the end of the file
+                    // not the end of the file: either an empty line, which the tailer does not
+                    // deliver, or a line longer than what the reader returns in one call. Both made
+                    // progress, so reading on cannot spin
                     continue;
                 }
 
@@ -190,13 +192,31 @@ public class TailQueueFileTailer implements Closeable {
     /**
      * The writer appends and only then renames, so lines may have arrived after the last read: the
      * file is drained to its real end before it counts as delivered.
+     * <p>
+     * Whatever stops the drain short of that - an interrupt, or a last line without its terminating
+     * new line, which this reader keeps in its buffer and would never hand out - leaves the file
+     * unrecorded, so the dir sender sends it in full. That costs duplicates for the lines already
+     * delivered and loses none.
      */
     private void finishRolledFile() throws IOException {
         String line;
         while ((line = reader.readLine()) != null || !reader.isEndOfFile()) {
+
+            if (Thread.currentThread().isInterrupted()) {
+                LOG.warn("Interrupted while draining the rolled file {}, it will be sent as a whole", readerFileName);
+                close();
+                return;
+            }
+
             if (line != null) {
                 sendLine(line);
             }
+        }
+
+        if (reader.hasPartialLine()) {
+            LOG.warn("Rolled file {} does not end with a new line, sending it as a whole", readerFileName);
+            close();
+            return;
         }
 
         deliveredFiles.add(readerFileKey);
