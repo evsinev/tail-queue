@@ -25,6 +25,11 @@ public class TailQueueMetricsListenerListenerNoOp implements ITailQueueMetricsLi
     }
 
     @Override
+    public void didSenderDirQuarantineFile() {
+
+    }
+
+    @Override
     public void didSenderDirSendFile(int current, int count) {
 
     }

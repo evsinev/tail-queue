@@ -1,0 +1,7 @@
+schema: spec-driven
+
+context: |
+  Java 8+ library, Maven multi-module (tail-queue-core has zero runtime deps besides slf4j; keep it that way).
+  Domain: payment-grade file-backed delivery queue (write lines to rolling files, tail and send them).
+  Delivery semantics: at-least-once; consumers must be idempotent.
+  Conventions: JUnit 4 tests in tail-queue-test module; slf4j logging; no new dependencies in core.

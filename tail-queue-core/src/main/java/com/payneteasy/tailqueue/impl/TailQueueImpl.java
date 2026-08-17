@@ -12,11 +12,11 @@ public class TailQueueImpl implements ITailQueue {
 
     private static final Logger LOG = LoggerFactory.getLogger( TailQueueImpl.class );
 
-    private final ITailQueueWriter    writer;
+    private final TailQueueWriterImpl writer;
     private final TailQueueSenderTask senderTask;
     private final Thread              thread;
 
-    public TailQueueImpl(ITailQueueWriter writer, TailQueueSenderTask senderTask) {
+    public TailQueueImpl(TailQueueWriterImpl writer, TailQueueSenderTask senderTask) {
         this.writer     = writer;
         this.senderTask = senderTask;
 
@@ -37,5 +37,8 @@ public class TailQueueImpl implements ITailQueue {
     public void shutdownQueueSender() {
         LOG.debug("Shutting down...");
         thread.interrupt();
+
+        // releases the active file descriptor; a later writeMessage() reopens it
+        writer.close();
     }
 }
