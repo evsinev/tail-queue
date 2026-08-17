@@ -49,10 +49,15 @@ public class TailQueueDeliveredFiles {
             return;
         }
 
-        if (fileKeys.size() >= MAX_SIZE) {
+        while (fileKeys.size() >= MAX_SIZE) {
+            // the oldest entry is the one whose file the dir sender should have taken long ago, so it
+            // is the one to lose: an entry which outlives its file could be matched by a new file
+            // which the filesystem gave the same key, and that file would be archived unsent
+            Object oldest = fileKeys.iterator().next();
+            fileKeys.remove(oldest);
+
             LOG.warn("Too many files delivered by the tailer and not yet processed by the dir sender ({}),"
-                    + " {} will be sent again", MAX_SIZE, aFileKey);
-            return;
+                    + " forgetting {}, it will be sent again if it is still there", MAX_SIZE, oldest);
         }
 
         fileKeys.add(aFileKey);
@@ -64,5 +69,13 @@ public class TailQueueDeliveredFiles {
      */
     public boolean consume(Object aFileKey) {
         return enabled && aFileKey != null && fileKeys.remove(aFileKey);
+    }
+
+    /**
+     * @return how many delivered files the dir sender has not taken yet. Steadily above zero means a
+     *         record is outliving its file, which is a bug and not a queue which is merely busy.
+     */
+    public int size() {
+        return fileKeys.size();
     }
 }

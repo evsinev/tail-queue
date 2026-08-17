@@ -40,8 +40,8 @@ archived without being sent, so a flat zero on a busy queue means `SKIP` is not 
 
 The sender identifies a file across the rename which publishes it, so the queue dir must be on a
 filesystem which exposes file keys (`BasicFileAttributes.fileKey()`), as any local POSIX filesystem
-does. If it does not, building the queue throws instead of quietly delivering the same lines again on
-every cycle.
+does. Without them the tailer does not read the active file at all, and every message would wait for
+its file to be rolled - so building the queue throws instead of quietly turning live tailing off.
 
 No message is lost: a message is only removed from the queue dir after it has been sent, and a
 message which can neither be sent nor written to the failsafe dir keeps its file in the queue.

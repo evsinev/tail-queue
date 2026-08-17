@@ -163,8 +163,11 @@ public class TailQueueBuilder {
     /**
      * The sender identifies a file across the rename by which the writer publishes it: the tailer
      * needs it to tell its own rolled file from an unrelated closed file, and {@code SKIP} needs it
-     * to recognize a file it has already delivered. Without it the sender would deliver the lines of
-     * the active file again on every cycle, so the queue refuses to start instead of degrading.
+     * to recognize a file it has already delivered.
+     * <p>
+     * Without file keys the tailer refuses to open the active file at all, so nothing would be
+     * delivered live and every message would wait for its file to be rolled. That is a silent
+     * latency regression rather than a loss, and the queue refuses to start instead of hiding it.
      */
     private void checkFileKeysAreSupported() {
         if (fileKeys.fileKeyOf(dir) != null) {

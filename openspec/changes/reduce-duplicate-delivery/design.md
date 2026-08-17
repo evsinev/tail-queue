@@ -48,6 +48,8 @@ Consequence worth naming: with the reader held open, the fix for the intra-file 
 
 Names cannot be used: the file the tailer reads is `current.json.open` while it reads it and `20260817-1230.json` afterwards, and bucket names are reused across runs (`freeBucketFile` even appends `-1`, `-2` variants), so a name match could skip a *different* file's content — a silent message loss. A key match cannot: an inode is not reused while the file exists.
 
+Reading a key can fail for two very different reasons, and they must not be confused. "There is no key because the active file is gone" means the writer rolled it; "there is no key because the attributes could not be read this time" means nothing at all. Treating the second as a roll would make the tailer stop at the current end of a file the writer is still appending to and record it as delivered, losing everything appended afterwards — so the tailer only concludes "rolled" when the active file is really absent, and otherwise keeps reading and retries on the next cycle.
+
 ### D4: Finalize the tailed file before yielding, not on the next cycle
 
 Because `processDir()` runs *before* `tailOneFile()` in a cycle, a record written "next time the tailer runs" would arrive after the dir sender had already sent the file. So when the tailer is about to yield, it checks whether the file it holds is still the active one; if it is not, the file was rolled, and the tailer drains it to end of file, records its key as delivered, and closes the reader — all before returning. The sender task's cycle order stays as it is.
@@ -69,11 +71,20 @@ Two more ways the drain can end short of that, both of which must leave the file
 
 `build()` reads the file key of the queue directory (creating it first, as it already does) and throws if it is `null`, naming the directory and the selected mode. Probing at construction rather than per file means a misconfigured deployment fails at startup instead of degrading hours later under a log line nobody reads.
 
-The probe applies to `RESEND` as well, not only to `SKIP`, because D2 and D4 are always active: without file identity the tailer cannot tell "my file was rolled" from "an unrelated closed file appeared", so it would have to close its reader on every yield and re-deliver the beginning of the active file — the behavior the specs forbid. Requiring identity unconditionally keeps one code path instead of two.
+The probe applies to `RESEND` as well, not only to `SKIP`, because D2 and D4 are always active: the tailer will not open a file whose identity it cannot record, since it could otherwise end up holding one file while its key names another. On a filesystem without keys the tailer therefore delivers nothing live and every message waits for its file to be rolled — a silent latency regression, not a loss. Requiring identity unconditionally keeps one code path instead of two and makes that regression impossible to ship unnoticed.
 
 This is breaking on a filesystem whose `fileKey()` is `null`, in practice Windows and some network or FUSE mounts. Alternatives rejected: a heuristic roll detection from size, `lastModifiedTime` or `creationTime` reintroduces exactly the kind of guessing that `fix-message-loss-edge-cases` removed, and a keyless fallback that closes the reader on yield leaves a documented requirement unmet on that platform while doubling the tailer's state machine. If such a deployment appears, the two-phase roll handshake from D1 is the fallback to implement, since it needs no file identity at all.
 
-### D8: The record is small, and entries are evicted when used
+### D8: A record never outlives the file it names
+
+A file key is the identity of an *existing* file: once the file is unlinked, the filesystem may hand the same key to a new one. So an entry which outlives its file is not merely useless, it is dangerous — a later closed file which the tailer never read could match it and be archived without being sent. Two rules keep that from happening:
+
+- The tailer finalizes a rolled file at the **start** of the sender cycle, before the dir sender lists the directory (`finishPendingRoll`). Otherwise the sequence "tailer yields on an unrelated closed file → writer rolls → dir sender sends and deletes the file → tailer finally drains it" would both duplicate that file and leave behind a record for a deleted inode.
+- Before recording, the tailer checks that a closed file with that key is still in the queue dir. This covers whatever the cycle order cannot: a file removed by an operator, an archiver moving it away, a retention which deleted it out of band.
+
+Rejected alternative: recording the key regardless and treating a leftover entry as harmless. It is only harmless until an inode number is reused, which ext4 and xfs do readily, and the failure mode then is a silently archived file — the exact thing this library must never do.
+
+### D9: The record is small, and entries are evicted when used
 
 The delivered record holds file keys only, and the dir sender removes an entry when it consumes it (skips-and-archives that file). Since both run in one thread on every cycle, at most a handful of entries exist at a time. A defensive upper bound with a warning keeps a pathological case (retention permanently failing and quarantining files) from growing it without limit.
 

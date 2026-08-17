@@ -33,6 +33,10 @@ public class TailQueueSenderTask implements Runnable {
 
         while (!currentThread().isInterrupted()) {
             try {
+                // a file rolled while tailing was idle must be accounted for before the dir sender
+                // sees it, or it is sent twice
+                fileTailer.finishPendingRoll();
+
                 dirSender.processDir();
 
                 fileTailer.tailOneFile();

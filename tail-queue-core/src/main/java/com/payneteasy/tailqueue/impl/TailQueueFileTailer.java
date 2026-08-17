@@ -10,6 +10,7 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.NoSuchFileException;
 import java.time.Duration;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -72,6 +73,26 @@ public class TailQueueFileTailer implements Closeable {
     }
 
     /**
+     * Finishes a file which the writer rolled while tailing was idle, before the dir sender looks at
+     * the directory. The dir sender runs first in the sender cycle, so a file it finds before hearing
+     * that the tailer had delivered it would be sent a second time, and the record written afterwards
+     * would name a file which no longer exists.
+     */
+    public void finishPendingRoll() {
+        if (reader == null || !wasRolled()) {
+            return;
+        }
+
+        try {
+            finishRolledFile();
+        } catch (Exception e) {
+            LOG.error("Cannot finish the rolled file {}", readerFileName, e);
+            metricsListener.didSenderFileError();
+            close();
+        }
+    }
+
+    /**
      * Releases the file descriptor and forgets the position, so the file is delivered from its
      * first line again. Called when the sender stops and when delivery of a line failed.
      */
@@ -103,6 +124,11 @@ public class TailQueueFileTailer implements Closeable {
         TailQueueStrictLineReader in;
         try {
             in = new TailQueueStrictLineReader(new InputStreamReader(newInputStream(active.toPath()), UTF_8));
+        } catch (NoSuchFileException e) {
+            // the writer rolled the file between reading its key and opening it, which the next cycle
+            // handles by opening the new active file: not an error
+            LOG.debug("File {} was rolled before it could be opened", active.getAbsolutePath());
+            return false;
         } catch (IOException e) {
             LOG.error("Cannot open file {}", active.getAbsolutePath(), e);
             metricsListener.didSenderFileError();
@@ -184,9 +210,22 @@ public class TailQueueFileTailer implements Closeable {
      *         has published it under its bucket name
      */
     private boolean wasRolled() {
-        Object activeKey = fileKeys.fileKeyOf(fileNames.activeFile(dir));
+        File   active    = fileNames.activeFile(dir);
+        Object activeKey = fileKeys.fileKeyOf(active);
 
-        return activeKey == null || !activeKey.equals(readerFileKey);
+        if (activeKey != null) {
+            return !activeKey.equals(readerFileKey);
+        }
+
+        // no key: the file is either gone, which means it was rolled, or its attributes could not be
+        // read this time. Answering "rolled" for a file the writer still appends to would record it as
+        // delivered and lose everything appended afterwards, so only its absence counts
+        if (active.exists()) {
+            LOG.warn("Cannot read the file key of {}, assuming it is still the active file", active.getAbsolutePath());
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -219,11 +258,46 @@ public class TailQueueFileTailer implements Closeable {
             return;
         }
 
-        deliveredFiles.add(readerFileKey);
-
         LOG.debug("File {} was rolled, delivered {} lines of it", readerFileName, reader.getLineNumber());
 
+        recordDelivered();
+
         close();
+    }
+
+    /**
+     * A record may only be written for a file which is still waiting for the dir sender. A file key is
+     * the identity of an existing file: once the file is gone, the filesystem is free to hand the same
+     * key to a new one, and a record nobody consumes would make the dir sender archive that new file
+     * without sending it.
+     */
+    private void recordDelivered() {
+        if (!deliveredFiles.isEnabled()) {
+            return;
+        }
+
+        if (!isWaitingForTheDirSender(readerFileKey)) {
+            LOG.debug("File {} is no longer in the queue dir, not recording it as delivered", readerFileName);
+            return;
+        }
+
+        deliveredFiles.add(readerFileKey);
+    }
+
+    private boolean isWaitingForTheDirSender(Object aFileKey) {
+        File[] files = dir.listFiles(fileFilter);
+
+        if (files == null) {
+            return false;
+        }
+
+        for (File file : files) {
+            if (aFileKey.equals(fileKeys.fileKeyOf(file))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void sleepForNewLine() throws InterruptedException {

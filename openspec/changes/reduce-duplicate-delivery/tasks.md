@@ -45,6 +45,13 @@
 - [x] 7.1 Add `TailQueueStrictLineReader.hasPartialLine()` and leave a rolled file unrecorded when its last line is not terminated, so the dir sender delivers that content instead of the file being archived with it undelivered
 - [x] 7.2 Check the interrupt flag while draining a rolled file: drop the record and stop, instead of pushing the remaining lines through the failsafe during shutdown
 - [x] 7.3 Test: a rolled file without a trailing new line is sent as a whole in `SKIP`
+- [x] 7.4 Account for a roll which happened while tailing was idle at the start of the sender cycle (`finishPendingRoll`), before the dir sender lists the directory
+- [x] 7.5 Record a delivered file only while a closed file with that key is still in the queue dir, so no record outlives its file and survives to match a reused file key
+- [x] 7.6 Evict the oldest entry instead of dropping the newest when the record is full, and expose `size()` for diagnostics
+- [x] 7.7 Conclude a roll from an absent active file, not from a file key which could not be read this time
+- [x] 7.8 Report a file rolled between reading its key and opening it at DEBUG, without the sender error metric
+- [x] 7.9 Correct the stated reason for the file-key requirement in the builder javadoc, `README.md` and design D7: without keys the tailer stops reading the active file, it does not resend it
+- [x] 7.10 Tests: idle roll accounted for before the dir sender, no record for a file which left the dir, an unreadable key is not a roll, and the eviction policy of the record
 
 ## 8. Documentation
 

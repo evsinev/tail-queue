@@ -27,6 +27,8 @@ In `SKIP` mode, when the tailer has delivered every line of a file up to its end
 
 The record that a file was delivered by the tailer SHALL survive the writer's atomic rename of that file from the active name to its bucket name, and SHALL identify the file itself rather than a name, so that a file which merely reuses a name is never mistaken for a delivered one.
 
+The record SHALL NOT outlive the file it refers to: no closed file SHALL be treated as delivered because it inherited the name or the identity of a file which was delivered earlier.
+
 A closed file the tailer never read — a backlog file, a file left by a previous run, or a file recovered from a crash — SHALL be sent in full in both modes.
 
 #### Scenario: Rolled file is archived, not resent
@@ -38,6 +40,11 @@ A closed file the tailer never read — a backlog file, a file left by a previou
 
 - **WHEN** retention cannot archive or delete such a file
 - **THEN** the file is quarantined exactly as a file which the dir sender itself had sent, and its content is not sent on a later cycle
+
+#### Scenario: The file is gone before the sender could skip it
+
+- **WHEN** a file the tailer delivered in full leaves the queue dir before the dir sender processes it (it was sent by an earlier cycle, archived out of band, or removed by an operator)
+- **THEN** no record of it is left behind, and a closed file which later happens to carry the same identity is still sent in full
 
 #### Scenario: File the tailer never read
 

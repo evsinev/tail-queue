@@ -3,6 +3,7 @@ package com.payneteasy.tailqueue.impl;
 import com.payneteasy.tailqueue.ITailQueueSender;
 import com.payneteasy.tailqueue.TailQueueDuplicatePolicy;
 import com.payneteasy.tailqueue.impl.util.FileKeys;
+import com.payneteasy.tailqueue.impl.util.IFileKeyResolver;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -166,6 +167,100 @@ public class TailQueueDuplicatePolicyTest {
     }
 
     /**
+     * The dir sender runs before the tailer in the sender cycle, so a file rolled while tailing was
+     * idle has to be accounted for at the start of the cycle. Otherwise it is sent a second time and
+     * the record ends up naming a file which the dir sender has already deleted.
+     */
+    @Test
+    public void aFileRolledWhileTailingWasIdleIsAccountedForBeforeTheDirSenderRuns() throws Exception {
+        usePolicy(SKIP);
+
+        write(ACTIVE, "first\n");
+
+        TailQueueFileTailer tailer = createTailer(aLine -> {
+            sentLines.add(aLine);
+            write(UNRELATED, "unrelated\n"); // makes the tailer yield while its own file is still active
+        });
+
+        tailer.tailOneFile();
+
+        createDirSender().processDir();
+
+        // the writer rolls the file between two cycles, with nobody tailing
+        roll();
+
+        // the next cycle, in the order the sender task runs it
+        tailer.finishPendingRoll();
+        createDirSender().processDir();
+        tailer.tailOneFile();
+
+        assertThat(sentLines).containsExactly("first", "unrelated");
+        assertThat(metrics.senderDirSkipFile).isEqualTo(1);
+        assertThat(deliveredFiles.size()).as("the record was consumed").isZero();
+    }
+
+    /**
+     * A file key identifies an existing file, so a record which outlives its file could be matched by
+     * a new file the filesystem gave the same key - and that file would be archived unsent.
+     */
+    @Test
+    public void doesNotRecordAFileWhichHasLeftTheQueueDir() throws Exception {
+        usePolicy(SKIP);
+
+        write(ACTIVE, "first\n");
+
+        TailQueueFileTailer tailer = createTailer(aLine -> {
+            sentLines.add(aLine);
+            write(UNRELATED, "unrelated\n");
+        });
+
+        tailer.tailOneFile();
+
+        // the file is rolled and then leaves the queue dir before the tailer finishes it
+        roll();
+        assertThat(new File(dir, ROLLED).delete()).isTrue();
+
+        tailer.finishPendingRoll();
+
+        assertThat(deliveredFiles.size()).as("nothing to skip, so nothing is recorded").isZero();
+    }
+
+    /**
+     * "No file key this time" is not the same as "the file is gone". Concluding a roll from a failed
+     * read would stop the tailer at the current end of a file the writer is still appending to and
+     * record it as delivered, losing every line which arrives afterwards.
+     */
+    @Test
+    public void doesNotTreatAnUnreadableFileKeyAsARoll() throws Exception {
+        usePolicy(SKIP);
+
+        write(ACTIVE, "first\n");
+
+        // the key can be read while the file is being opened and not afterwards
+        int[] calls = {0};
+        TailQueueFileTailer tailer = createTailer(
+                aLine -> {
+                    sentLines.add(aLine);
+                    write(UNRELATED, "unrelated\n");
+                }
+                , aFile -> ++calls[0] <= 2 ? FileKeys.fileKeyOf(aFile) : null
+        );
+
+        tailer.tailOneFile();
+
+        assertThat(sentLines).containsExactly("first");
+        assertThat(deliveredFiles.size()).as("the active file was not treated as rolled").isZero();
+        assertThat(new File(dir, ACTIVE)).exists();
+
+        // the file is still the one being tailed, so the next line is delivered from the same reader
+        // instead of the file being abandoned with its position lost
+        append(ACTIVE, "second\n");
+        tailer.tailOneFile();
+
+        assertThat(sentLines).containsExactly("first", "second");
+    }
+
+    /**
      * The tailer keeps a line whose new line has not arrived in its buffer and never hands it out, so
      * a rolled file which does not end with a new line has not been delivered in full and must be
      * sent as a whole - otherwise archiving it would drop that last line.
@@ -243,6 +338,10 @@ public class TailQueueDuplicatePolicyTest {
     }
 
     private TailQueueFileTailer createTailer(ITailQueueSender aSender) {
+        return createTailer(aSender, FileKeys.SYSTEM);
+    }
+
+    private TailQueueFileTailer createTailer(ITailQueueSender aSender, IFileKeyResolver aFileKeys) {
         return new TailQueueFileTailer(
                 dir
                 , aSender
@@ -250,7 +349,7 @@ public class TailQueueDuplicatePolicyTest {
                 , new TailQueueFileNames("", ".json")
                 , Duration.ofMillis(1)
                 , metrics
-                , FileKeys.SYSTEM
+                , aFileKeys
                 , deliveredFiles
         );
     }
