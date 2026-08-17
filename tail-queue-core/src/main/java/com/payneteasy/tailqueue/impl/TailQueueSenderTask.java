@@ -50,6 +50,10 @@ public class TailQueueSenderTask implements Runnable {
                 metricsListener.didSenderTaskErrorProcessingDir();
             }
         }
+
+        // the tailer holds the active file open between cycles
+        fileTailer.close();
+
         LOG.debug("Exited from sender task");
     }
 }

@@ -11,10 +11,37 @@ Allows to write and send lines from a simple file using tail-like mechanism
 
 ## Delivery semantics
 
-Delivery is **at-least-once**. A message can be delivered more than once - the live file is
-tailed while it is being written and its content is sent again when the file is closed, and a
-crash between sending a file and archiving it replays that file. **The consumer must be
-idempotent** and deduplicate messages itself.
+Delivery is **at-least-once** in every mode. **The consumer must be idempotent** and deduplicate
+messages itself.
+
+How many copies it sees in the normal case is a choice:
+
+| `duplicatePolicy` | behaviour                                                                                     |
+|-------------------|-----------------------------------------------------------------------------------------------|
+| `RESEND` (default)| the live file is tailed while it is being written, and its whole content is sent again once the file is closed: **two copies** of every message |
+| `SKIP`            | a closed file whose lines the tailer already delivered is archived without being sent again: **one copy** in the normal case |
+
+```java
+ITailQueue queue = new TailQueueBuilder()
+    .dir(new File("./queue-dir"))
+    .sender(aLine -> LOG.info("Sending line {}", aLine))
+
+    // one delivery per message in the normal case. Default: RESEND
+    .duplicatePolicy(TailQueueDuplicatePolicy.SKIP)
+
+    .build();
+```
+
+Even with `SKIP` a message can arrive more than once: a process restart re-delivers a file which was
+only partially tailed, a failed send makes the whole file be sent again, and a file the tailer never
+read (a backlog file, a file left by a crashed process) is always sent in full. The
+`tail_queue_sender_dir_skip_file` metric (`didSenderDirSkipFile`) counts the files which were
+archived without being sent, so a flat zero on a busy queue means `SKIP` is not taking effect.
+
+The sender identifies a file across the rename which publishes it, so the queue dir must be on a
+filesystem which exposes file keys (`BasicFileAttributes.fileKey()`), as any local POSIX filesystem
+does. If it does not, building the queue throws instead of quietly delivering the same lines again on
+every cycle.
 
 No message is lost: a message is only removed from the queue dir after it has been sent, and a
 message which can neither be sent nor written to the failsafe dir keeps its file in the queue.
@@ -107,3 +134,6 @@ but may be lost if the machine loses power.
 * The writer now appends to a `.open` file and publishes it by renaming. Existing files in a queue
   dir are already closed files and are processed as before. Downgrading after a crash leaves an
   unprocessed `.open` file, which an older version will not pick up.
+* The queue dir must be on a filesystem which exposes file keys, in both duplicate policies:
+  `build()` now throws on one which does not (in practice Windows, and some network or FUSE mounts).
+  Delivery behaviour itself is unchanged unless `duplicatePolicy(SKIP)` is set.

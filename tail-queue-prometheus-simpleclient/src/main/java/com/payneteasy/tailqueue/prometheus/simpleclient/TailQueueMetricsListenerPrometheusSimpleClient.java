@@ -14,6 +14,7 @@ public class TailQueueMetricsListenerPrometheusSimpleClient implements ITailQueu
     private final Counter.Child senderTaskErrorProcessingDir;
     private final Counter.Child senderDirArchiveFile;
     private final Counter.Child senderDirQuarantineFile;
+    private final Counter.Child senderDirSkipFile;
     private final Gauge.Child   senderDirSendFileCurrent;
     private final Gauge.Child   senderDirSendFileCount;
     private final Gauge.Child   senderDirFilesCount;
@@ -45,6 +46,11 @@ public class TailQueueMetricsListenerPrometheusSimpleClient implements ITailQueu
     @Override
     public void didSenderDirQuarantineFile() {
         senderDirQuarantineFile.inc();
+    }
+
+    @Override
+    public void didSenderDirSkipFile() {
+        senderDirSkipFile.inc();
     }
 
     @Override

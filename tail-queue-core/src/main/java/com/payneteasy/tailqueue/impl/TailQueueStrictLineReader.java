@@ -12,7 +12,8 @@ public class TailQueueStrictLineReader implements Closeable {
     private final Reader        reader;
     private final StringBuilder buffer = new StringBuilder();
 
-    private int lineNumber = 0;
+    private int     lineNumber = 0;
+    private boolean endOfFile  = false;
 
     public TailQueueStrictLineReader(Reader reader) {
         this.reader = reader;
@@ -25,10 +26,13 @@ public class TailQueueStrictLineReader implements Closeable {
 
     public String readLine() throws IOException {
 
+        endOfFile = false;
+
         for (int i = 0; i < 100_000; i++) {
             int read = reader.read();
 
             if (read == -1) {
+                endOfFile = true;
                 return null;
             }
 
@@ -53,5 +57,16 @@ public class TailQueueStrictLineReader implements Closeable {
 
     public int getLineNumber() {
         return lineNumber;
+    }
+
+    /**
+     * {@link #readLine()} answers null both at the end of the file and for an empty line, so a
+     * caller which must not stop reading early asks here which of the two it was.
+     *
+     * @return true if the last {@link #readLine()} returned null because there was nothing left to
+     *         read, false if it returned null because it skipped an empty line
+     */
+    public boolean isEndOfFile() {
+        return endOfFile;
     }
 }
